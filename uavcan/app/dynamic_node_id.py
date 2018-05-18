@@ -8,9 +8,12 @@
 #
 
 from __future__ import division, absolute_import, print_function, unicode_literals
+
+import threading
 import time
-import sqlite3
 from logging import getLogger
+from typing import NamedTuple, Optional
+
 import uavcan
 from uavcan import UAVCANException
 
@@ -27,67 +30,73 @@ class CentralizedServer(object):
     DEFAULT_NODE_ID_RANGE = 1, 125
     DATABASE_STORAGE_MEMORY = ':memory:'
 
-    class AllocationTable(object):
-        def __init__(self, path):
-            # Disabling same thread check on the assumption that the developer knows what they are doing.
-            self.db = sqlite3.connect(path, check_same_thread=False)  # @UndefinedVariable
+    class PruningAllocationTable:
+        """
+        Assigns a CAN node ID with a hardware UUID. If a node disappears, it will be removed from the table after some
+        timeout period
+        """
+        NodeInfo = NamedTuple('NodeInfo', [('unique_id', Optional[bytes]), ('last_seen', int)])
+
+        def __init__(self, node: uavcan.node.Node, prune_age: float = 15):
+            self.node = node  # type: uavcan.node.Node
+            self.prune_age = prune_age  # type: float
+
             self.lock = threading.Lock()
+            self.ids = {}  # type: Mapping[int, PruningAllocationTable.NodeInfo]
 
-            self._modify('''CREATE TABLE IF NOT EXISTS `allocation` (
-            `node_id`   INTEGER NOT NULL UNIQUE,
-            `unique_id` blob,
-            `ts`        time NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY(node_id));''')
+            self.handler = self.node.add_handler(uavcan.protocol.NodeStatus, self.node_status_callback)
 
-        def _modify(self, what, *args):
+        def node_status_callback(self, event: uavcan.node.TransferEvent):
+            self.update_timestamp(event.transfer.source_node_id)
+            self.prune()
+
+        def update_timestamp(self, node_id):
             with self.lock:
-                c = self.db.cursor()
-                c.execute(what, args)   # Tuple!
-                self.db.commit()
+                if node_id in self.ids:
+                    self.ids[node_id] = CentralizedServer.PruningAllocationTable.NodeInfo(
+                        unique_id=self.ids[node_id].unique_id, last_seen=time.monotonic())
 
         def close(self):
-            self.db.close()
+            self.handler.try_remove()
 
         def set(self, unique_id, node_id):
-            if unique_id is not None and unique_id == bytes([0] * len(unique_id)):
-                unique_id = None
-            if unique_id is not None:
-                unique_id = sqlite3.Binary(unique_id)
-            logger.debug('[CentralizedServer] AllocationTable update: %d %s', node_id, _unique_id_to_string(unique_id))
-            self._modify('''insert or replace into allocation (node_id, unique_id) values (?, ?);''',
-                         node_id, unique_id)
+            self.prune()
+            with self.lock:
+                if unique_id is not None and unique_id == bytes([0] * len(unique_id)):
+                    unique_id = None
+                self.ids[node_id] = CentralizedServer.PruningAllocationTable.NodeInfo(
+                    unique_id=unique_id, last_seen=time.monotonic())
 
         def get_node_id(self, unique_id):
-            assert isinstance(unique_id, bytes)
+            self.prune()
             with self.lock:
-                c = self.db.cursor()
-                c.execute('''select node_id from allocation where unique_id = ? order by ts desc limit 1''',
-                          (unique_id,))
-                res = c.fetchone()
-                return res[0] if res else None
+                for node_id, node_info in self.ids.items():
+                    if node_info.unique_id == unique_id:
+                        return node_id
+            return None
 
         def get_unique_id(self, node_id):
-            assert isinstance(node_id, int)
+            self.prune()
             with self.lock:
-                c = self.db.cursor()
-                c.execute('''select unique_id from allocation where node_id = ?''', (node_id,))
-                res = c.fetchone()
-                return res[0] if res else None
+                if node_id in self.ids:
+                    return self.ids[node_id].unique_id
+            return None
 
         def is_known_node_id(self, node_id):
-            assert isinstance(node_id, int)
-            with self.lock:
-                c = self.db.cursor()
-                c.execute('''select count(*) from allocation where node_id = ?''', (node_id,))
-                return c.fetchone()[0] > 0
+            return node_id in self.ids
 
-        def get_entries(self):
+        def prune(self):
             with self.lock:
-                c = self.db.cursor()
-                c.execute('''select unique_id, node_id from allocation order by ts desc''')
-                return list(c.fetchall())
+                old_node_ids = set()
 
-    def __init__(self, node, node_monitor, database_storage=None, dynamic_node_id_range=None):
+                for node_id, node_info in self.ids.items():
+                    if node_id != self.node.node_id and time.monotonic() - node_info.last_seen > self.prune_age:
+                        old_node_ids.add(node_id)
+
+                for node_id in old_node_ids:
+                    del self.ids[node_id]
+
+    def __init__(self, node, node_monitor, dynamic_node_id_range=None):
         """
         :param node: Node instance.
 
@@ -103,7 +112,7 @@ class CentralizedServer(object):
 
         self._node_monitor = node_monitor
 
-        self._allocation_table = CentralizedServer.AllocationTable(database_storage or self.DATABASE_STORAGE_MEMORY)
+        self._allocation_table = CentralizedServer.PruningAllocationTable(node)
         self._query = bytes()
         self._query_timestamp = 0
         self._node_monitor_event_handle = node_monitor.add_update_handler(self._handle_monitor_event)
