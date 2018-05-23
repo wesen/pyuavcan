@@ -37,6 +37,7 @@ class FileServer(object):
 
         self.lookup_paths = lookup_paths or []
 
+        self.last_file_offset_requested = defaultdict(int)
         self._path_hit_counters = defaultdict(int)
         self._handles = []
 
@@ -86,6 +87,7 @@ class FileServer(object):
         logger.debug("[#{0:03d}:uavcan.protocol.file.Read] {1!r} @ offset {2:d}"
                      .format(e.transfer.source_node_id, e.request.path.path.decode(), e.request.offset))
         try:
+            self.last_file_offset_requested[e.request.path.path.decode()] = e.request.offset
             with open(self._resolve_path(e.request.path), "rb") as f:
                 f.seek(e.request.offset)
                 resp = uavcan.protocol.file.Read.Response()
