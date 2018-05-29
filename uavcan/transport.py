@@ -406,7 +406,7 @@ class ArrayValue(BaseValue, collections.MutableSequence):
 
         else:
             del self[:]
-            count_width = int(math.ceil(math.log(self._type.max_size, 2))) or 1
+            count_width = int(math.ceil(math.log(self._type.max_size + 1, 2))) or 1
             count = int(stream[0:count_width], 2)
             stream = stream[count_width:]
             for _, last, i in enum_mark_last(range(count)):
