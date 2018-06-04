@@ -8,6 +8,9 @@
 #
 
 from __future__ import division, absolute_import, print_function, unicode_literals
+
+from queue import Queue
+
 import time
 import collections
 import sched
@@ -222,7 +225,7 @@ class TransferHookDispatcher(object):
 
 class Node(Scheduler):
     def __init__(self, can_driver, node_id=None, node_status_interval=None,
-                 mode=None, node_info=None, **_extras):
+                 mode=None, node_info=None, queue_rx=False, **_extras):
         """
         It is recommended to use make_node() rather than instantiating this type directly.
 
@@ -238,6 +241,9 @@ class Node(Scheduler):
                           node is queried for its node info.
         """
         super(Node, self).__init__()
+
+        self.queue_rx = queue_rx
+        self.rx_buffer = Queue()
 
         self._handler_dispatcher = HandlerDispatcher(self)
 
@@ -292,21 +298,7 @@ class Node(Scheduler):
     def can_driver(self):
         return self._can_driver
 
-    def _recv_frame(self, raw_frame):
-        if not raw_frame.extended:
-            return
-
-        frame = transport.Frame(raw_frame.id, raw_frame.data, raw_frame.ts_monotonic, raw_frame.ts_real)
-
-        transfer_frames = self._transfer_manager.receive_frame(frame)
-        if not transfer_frames:
-            return
-
-        transfer = transport.Transfer()
-        transfer.from_frames(transfer_frames)
-
-        self._transfer_hook_dispatcher.call_hooks(self._transfer_hook_dispatcher.TRANSFER_DIRECTION_INCOMING, transfer)
-
+    def handle_transfer(self, transfer):
         if (transfer.service_not_message and not transfer.request_not_response) and \
                 transfer.dest_node_id == self._node_id:
             # This is a reply to a request we sent. Look up the original request and call the appropriate callback
@@ -322,6 +314,25 @@ class Node(Scheduler):
         elif not transfer.service_not_message or transfer.dest_node_id == self._node_id:
             # This is a request or a broadcast; look up the appropriate handler by data type ID
             self._handler_dispatcher.call_handlers(transfer)
+
+    def _recv_frame(self, raw_frame):
+        if not raw_frame.extended:
+            return
+
+        frame = transport.Frame(raw_frame.id, raw_frame.data, raw_frame.ts_monotonic, raw_frame.ts_real)
+
+        transfer_frames = self._transfer_manager.receive_frame(frame)
+        if not transfer_frames:
+            return
+
+        transfer = transport.Transfer()
+        transfer.from_frames(transfer_frames)
+
+        self._transfer_hook_dispatcher.call_hooks(self._transfer_hook_dispatcher.TRANSFER_DIRECTION_INCOMING, transfer)
+        if self.queue_rx:
+            self.rx_buffer.put_nowait(transfer)
+        else:
+            self.handle_transfer(transfer)
 
     def _next_transfer_id(self, key):
         transfer_id = self._next_transfer_ids[key]
