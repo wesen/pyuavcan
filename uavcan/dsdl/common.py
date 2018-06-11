@@ -58,7 +58,7 @@ def crc16_from_bytes(bytes, initial=0xFFFF):
             bytes = map(ord, bytes)
     except NameError:
         if isinstance(bytes, str):  # This branch will be taken on Python 3
-            bytes = map(ord, bytes)
+            bytes = bytes.encode()
 
     return binascii.crc_hqx(bytes, initial)
 
