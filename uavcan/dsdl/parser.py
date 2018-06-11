@@ -10,6 +10,7 @@
 from __future__ import division, absolute_import, print_function, unicode_literals
 import os
 import re
+from functools import lru_cache
 from logging import getLogger
 from io import StringIO
 from .signature import Signature, compute_signature
@@ -165,6 +166,7 @@ class ArrayType(Type):
         else:
             return 0    # Considering TAO
 
+    @lru_cache()
     def get_data_type_signature(self):
         return self.value_type.get_data_type_signature()
 
@@ -301,6 +303,7 @@ class CompoundType(Type):
         """Returns full type name string, e.g. 'uavcan.protocol.NodeStatus'"""
         return self.full_name
 
+    @lru_cache()
     def get_data_type_signature(self):
         """
         Computes data type signature of this type. The data type signature is
