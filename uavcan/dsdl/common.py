@@ -8,6 +8,8 @@
 #
 
 from __future__ import division, absolute_import, print_function, unicode_literals
+
+import binascii
 import os
 import struct
 from uavcan import UAVCANException
@@ -58,15 +60,7 @@ def crc16_from_bytes(bytes, initial=0xFFFF):
         if isinstance(bytes, str):  # This branch will be taken on Python 3
             bytes = map(ord, bytes)
 
-    crc = initial
-    for byte in bytes:
-        crc ^= byte << 8
-        for bit in range(8):
-            if crc & 0x8000:
-                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
-            else:
-                crc = (crc << 1) & 0xFFFF
-    return crc & 0xFFFF
+    return binascii.crc_hqx(bytes, initial)
 
 
 def bytes_from_crc64(crc64):
