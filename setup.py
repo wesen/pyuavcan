@@ -10,7 +10,7 @@
 
 import os
 import sys
-from setuptools import setup, Extension
+from setuptools import setup
 
 __version__ = None
 VERSION_FILE = os.path.join(os.path.dirname(__file__), 'uavcan', 'version.py')
@@ -32,8 +32,6 @@ args = dict(
                    for root, dirs, files in os.walk('uavcan/dsdl_files')
                    for fname in files if fname.endswith('.uavcan')]
     },
-    ext_package='uavcan',
-    ext_modules=[Extension(name='fastcrc64', sources=['uavcan/fastcrc64.c'])],
     author='Pavel Kirienko, Ben Dyer',
     author_email='uavcan@googlegroups.com',
     url='http://uavcan.org/Implementations/Pyuavcan',
