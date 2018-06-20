@@ -836,7 +836,7 @@ class TransferManager(object):
                 self.active_transfers[key] = []
 
             self.active_transfers[key].append(frame)
-            self.active_transfer_timestamps[key] = time.monotonic()
+            self.active_transfer_timestamps[key] = frame.ts_monotonic
 
             # If the last frame of a transfer was received, return its frames
             if frame.end_of_transfer:

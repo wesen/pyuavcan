@@ -298,7 +298,18 @@ class Node(Scheduler):
     def can_driver(self):
         return self._can_driver
 
-    def handle_transfer(self, transfer):
+    def handle_raw_frame(self, raw_frame):
+        frame = transport.Frame(raw_frame.id, raw_frame.data, raw_frame.ts_monotonic, raw_frame.ts_real)
+
+        transfer_frames = self._transfer_manager.receive_frame(frame)
+        if not transfer_frames:
+            return
+
+        transfer = transport.Transfer()
+        transfer.from_frames(transfer_frames)
+
+        self._transfer_hook_dispatcher.call_hooks(self._transfer_hook_dispatcher.TRANSFER_DIRECTION_INCOMING, transfer)
+
         if (transfer.service_not_message and not transfer.request_not_response) and \
                 transfer.dest_node_id == self._node_id:
             # This is a reply to a request we sent. Look up the original request and call the appropriate callback
@@ -319,20 +330,10 @@ class Node(Scheduler):
         if not raw_frame.extended:
             return
 
-        frame = transport.Frame(raw_frame.id, raw_frame.data, raw_frame.ts_monotonic, raw_frame.ts_real)
-
-        transfer_frames = self._transfer_manager.receive_frame(frame)
-        if not transfer_frames:
-            return
-
-        transfer = transport.Transfer()
-        transfer.from_frames(transfer_frames)
-
-        self._transfer_hook_dispatcher.call_hooks(self._transfer_hook_dispatcher.TRANSFER_DIRECTION_INCOMING, transfer)
         if self.queue_rx:
-            self.rx_buffer.put_nowait(transfer)
+            self.rx_buffer.put_nowait(raw_frame)
         else:
-            self.handle_transfer(transfer)
+            self.handle_raw_frame(raw_frame)
 
     def _next_transfer_id(self, key):
         transfer_id = self._next_transfer_ids[key]
