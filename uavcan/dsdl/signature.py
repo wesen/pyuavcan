@@ -33,8 +33,6 @@ class Signature:
 
     crc64lib = None
 
-    WARNED_MISSING_DLL = False
-
     dll_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
                             '../fastcrc64.{}.so'.format(sysconfig.get_config_vars('SOABI')[0]))
     if os.path.exists(dll_path):
@@ -44,6 +42,8 @@ class Signature:
 
         crc64lib.finalize.restype = ctypes.c_uint64
         crc64lib.finalize.argtypes = [ctypes.c_uint64]
+    else:
+        logging.getLogger(__name__).warning("Reverting to python CRC routine, couldn't load DLL {}".format(dll_path))
 
     def __init__(self, extend_from=None):
         """
@@ -71,10 +71,6 @@ class Signature:
         if Signature.crc64lib is not None:
             self._crc = Signature.crc64lib.crc64(data_bytes, num_bytes, self._crc)
         else:
-            if not Signature.WARNED_MISSING_DLL:
-                logging.getLogger(__name__).warning("Reverting to python CRC routine, couldn't load DLL")
-                Signature.WARNED_MISSING_DLL = True
-
             for b in data_bytes:
                 self._crc ^= (b << 56) & Signature.MASK64
                 for _ in range(8):
