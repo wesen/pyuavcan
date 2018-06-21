@@ -62,6 +62,9 @@ class Signature:
             if isinstance(data_bytes, str):  # This branch will be taken on Python 3
                 data_bytes = data_bytes.encode()
 
+        if not isinstance(data_bytes, bytes):
+            data_bytes = bytes(data_bytes)
+
         if Signature.crc64lib is not None:
             self._crc = Signature.crc64lib.crc64(data_bytes, num_bytes, self._crc)
         else:
