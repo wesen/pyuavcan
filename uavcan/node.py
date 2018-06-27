@@ -298,7 +298,7 @@ class Node(Scheduler):
     def can_driver(self):
         return self._can_driver
 
-    def handle_raw_frame(self, raw_frame):
+    def handle_raw_frame(self, raw_frame, handle_transfer=True):
         frame = transport.Frame(raw_frame.id, raw_frame.data, raw_frame.ts_monotonic, raw_frame.ts_real)
 
         transfer_frames = self._transfer_manager.receive_frame(frame)
@@ -308,6 +308,10 @@ class Node(Scheduler):
         transfer = transport.Transfer()
         transfer.from_frames(transfer_frames)
 
+        if handle_transfer:
+            self.handle_transfer(transfer)
+
+    def handle_transfer(self, transfer: transport.Transfer):
         self._transfer_hook_dispatcher.call_hooks(self._transfer_hook_dispatcher.TRANSFER_DIRECTION_INCOMING, transfer)
 
         if (transfer.service_not_message and not transfer.request_not_response) and \
