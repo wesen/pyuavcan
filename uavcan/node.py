@@ -310,6 +310,9 @@ class Node(Scheduler):
 
         if handle_transfer:
             self.handle_transfer(transfer)
+            return None
+        else:
+            return transfer
 
     def handle_transfer(self, transfer: transport.Transfer):
         self._transfer_hook_dispatcher.call_hooks(self._transfer_hook_dispatcher.TRANSFER_DIRECTION_INCOMING, transfer)
