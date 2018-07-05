@@ -146,7 +146,24 @@ class HandleRemover:
 class HandlerDispatcher(object):
     def __init__(self, node):
         self._handlers = []  # type, callable
+        from collections import Counter
+        self._registered_data_type_ids = Counter()
+
         self._node = node
+
+    def is_registered(self, data_type_id):
+        return self._registered_data_type_ids[data_type_id] > 0
+
+    def register_dtid(self, data_type_id):
+        self._registered_data_type_ids[data_type_id] += 1
+
+    def unregister_dtid(self, data_type_id):
+        self._registered_data_type_ids[data_type_id] -= 1
+        if self._registered_data_type_ids[data_type_id] < 0:
+            self._registered_data_type_ids[data_type_id] = 0
+
+    def clear_dtid(self, uavcan_type):
+        self._registered_data_type_ids[uavcan_type.default_dtid] = 0
 
     def add_handler(self, uavcan_type, handler, **kwargs):
         service = {
@@ -184,13 +201,23 @@ class HandlerDispatcher(object):
                                           (uavcan_type, handler))
 
         entry = uavcan_type, call
+        self.register_dtid(uavcan_type.default_dtid)
         self._handlers.append(entry)
-        return HandleRemover(lambda: self._handlers.remove(entry))
+
+        def remover():
+            self.unregister_dtid(uavcan_type.default_dtid)
+            self._handlers.remove(entry)
+
+        return HandleRemover(remover)
 
     def remove_handlers(self, uavcan_type):
         self._handlers = list(filter(lambda x: x[0] != uavcan_type, self._handlers))
+        self.clear_dtid(uavcan_type)
 
     def call_handlers(self, transfer):
+        if not self.is_registered(transfer.data_type_id):
+            return
+
         for uavcan_type, wrapper in self._handlers:
             if uavcan_type == get_uavcan_data_type(transfer.payload):
                 # noinspection PyBroadException
@@ -273,8 +300,12 @@ class Node(Scheduler):
             logger.debug('GetNodeInfo request from %r', e.transfer.source_node_id)
             self._fill_node_status(self.node_info.status)
             return self.node_info
+
         self.node_info = node_info or uavcan.protocol.GetNodeInfo.Response()     # @UndefinedVariable
         self.add_handler(uavcan.protocol.GetNodeInfo, on_get_node_info)          # @UndefinedVariable
+
+    def is_registered(self, data_type_id):
+        return self._handler_dispatcher.is_registered(data_type_id)
 
     @property
     def is_anonymous(self):
@@ -448,10 +479,14 @@ class Node(Scheduler):
         # Calling hooks
         self._transfer_hook_dispatcher.call_hooks(self._transfer_hook_dispatcher.TRANSFER_DIRECTION_OUTGOING, transfer)
 
+        dtid = get_uavcan_data_type(payload).default_dtid
+        self._handler_dispatcher.register_dtid(dtid)
+
         # Registering a callback that will be invoked if there was no response after 'timeout' seconds
         def on_timeout():
             del self._outstanding_requests[transfer.key]
             del self._outstanding_request_callbacks[transfer.key]
+            self._handler_dispatcher.unregister_dtid(dtid)
             callback(None)
 
         timeout = timeout or DEFAULT_SERVICE_TIMEOUT
@@ -460,6 +495,7 @@ class Node(Scheduler):
         # This wrapper will automatically cancel the timeout callback if there was a response
         def timeout_cancelling_wrapper(event):
             timeout_caller_handle.try_remove()
+            self._handler_dispatcher.unregister_dtid(dtid)
             callback(event)
 
         # Registering the pending request using the wrapper above instead of the callback
