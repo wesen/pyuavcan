@@ -196,7 +196,9 @@ class SocketCAN(AbstractDriver):
     def _writer_thread_loop(self):
         while not self._writer_thread_should_stop:
             try:
-                frame = self._write_queue.get(timeout=0.1)
+                frame = self._write_queue.get()
+                if frame is None:
+                    break
             except queue.Empty:
                 continue
 
@@ -237,6 +239,7 @@ class SocketCAN(AbstractDriver):
             raise DriverError('Unexpected item in write feedback queue: %r' % item)
 
     def close(self):
+        self._write_queue.put(None)
         self._writer_thread_should_stop = True
         self._writer_thread.join()
         self.socket.close()
